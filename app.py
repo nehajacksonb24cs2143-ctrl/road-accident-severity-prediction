@@ -1,12 +1,10 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.express as px
+import matplotlib.pyplot as plt
+import seaborn as sns
 
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.metrics import accuracy_score, f1_score
+from scipy.stats import normaltest, probplot
 
 
 # ============================================================
@@ -14,1119 +12,942 @@ from sklearn.metrics import accuracy_score, f1_score
 # ============================================================
 
 st.set_page_config(
-    page_title="Road Accident Analysis",
+    page_title="Road Accident Statistical Analysis",
     page_icon="🚗",
     layout="wide"
 )
 
 
 # ============================================================
-# TITLE
+# CUSTOM PAGE TITLE
 # ============================================================
 
-st.title("🚗 Road Accident Analysis & Severity Prediction")
+st.title("🚗 Road Accident Statistical Analysis Dashboard")
 
 st.markdown(
     """
-    **Interactive dashboard for analysing road accidents and
-    predicting accident severity using Machine Learning.**
+    ### Exploratory Data Analysis of Indian Road Accident Data
+
+    This dashboard focuses on understanding the statistical behavior
+    of road accident data through data cleaning, descriptive statistics,
+    distribution analysis, normality analysis, categorical analysis,
+    and correlation analysis.
     """
 )
 
-
-# ============================================================
-# LOAD DATA
-# ============================================================
-
-@st.cache_data
-def load_data():
-
-    df = pd.read_csv("indian_roads_dataset.csv")
-
-    return df
-
-
-try:
-
-    df = load_data()
-
-except Exception:
-
-    st.error(
-        "❌ Could not load Road.csv. "
-        "Make sure Road.csv is in the same folder as app.py."
-    )
-
-    st.stop()
-
-
-# ============================================================
-# CLEAN COLUMN NAMES
-# ============================================================
-
-df.columns = (
-    df.columns
-    .str.strip()
-    .str.lower()
-    .str.replace(" ", "_")
+st.info(
+    "Project Focus: Exploratory Data Analysis and Statistical "
+    "Behavior of Indian Road Accident Data"
 )
 
 
 # ============================================================
-# BASIC CLEANING
+# LOAD ORIGINAL DATASET
 # ============================================================
 
-df = df.drop_duplicates()
+@st.cache_data
+def load_original_data():
+
+    data = pd.read_csv("indian_roads_dataset.csv")
+
+    return data
 
 
-for column in df.columns:
-
-    if df[column].isna().any():
-
-        # Numeric columns
-        if pd.api.types.is_numeric_dtype(df[column]):
-
-            df[column] = df[column].fillna(
-                df[column].median()
-            )
-
-        # Categorical columns
-        else:
-
-            mode_value = df[column].mode()
-
-            if not mode_value.empty:
-
-                df[column] = df[column].fillna(
-                    mode_value.iloc[0]
-                )
-
-            else:
-
-                df[column] = df[column].fillna(
-                    "Unknown"
-                )
+original_df = load_original_data()
 
 
 # ============================================================
-# CHECK TARGET
+# DATA CLEANING
 # ============================================================
 
-if "accident_severity" not in df.columns:
+# Keep the original data for demonstrating missing values
+df = original_df.copy()
 
-    st.error(
-        "❌ The column 'accident_severity' was not found "
-        "in Road.csv."
-    )
+# Remove festival because it contains approximately
+# 99.42% missing values
+if "festival" in df.columns:
+    df = df.drop(columns=["festival"])
 
-    st.write("Available columns:")
 
-    st.write(df.columns.tolist())
+# ============================================================
+# COLUMN INFORMATION
+# ============================================================
 
-    st.stop()
+numerical_columns = df.select_dtypes(
+    include=np.number
+).columns.tolist()
+
+categorical_columns = df.select_dtypes(
+    include="object"
+).columns.tolist()
+
+
+# ============================================================
+# VARIABLES FOR DISTRIBUTION ANALYSIS
+# ============================================================
+
+analysis_columns = [
+    "latitude",
+    "longitude",
+    "hour",
+    "lanes",
+    "temperature",
+    "vehicles_involved",
+    "casualties",
+    "risk_score"
+]
+
+# Make sure all selected columns exist
+analysis_columns = [
+    column
+    for column in analysis_columns
+    if column in df.columns
+]
 
 
 # ============================================================
 # SIDEBAR
 # ============================================================
 
-st.sidebar.title("🔎 Dashboard Filters")
+st.sidebar.title("📌 Dashboard Navigation")
 
-st.sidebar.write(
-    "Use the filters below to explore the accident data."
-)
-
-
-# ============================================================
-# SEVERITY FILTER
-# ============================================================
-
-severity_options = sorted(
-    df["accident_severity"]
-    .dropna()
-    .astype(str)
-    .unique()
-)
-
-
-selected_severity = st.sidebar.multiselect(
-    "Accident Severity",
-    severity_options,
-    default=severity_options
-)
-
-
-# ============================================================
-# WEATHER FILTER
-# ============================================================
-
-if "weather" in df.columns:
-
-    weather_options = sorted(
-        df["weather"]
-        .dropna()
-        .astype(str)
-        .unique()
-    )
-
-    selected_weather = st.sidebar.multiselect(
-        "Weather",
-        weather_options,
-        default=weather_options
-    )
-
-else:
-
-    selected_weather = []
-
-
-# ============================================================
-# TRAFFIC DENSITY FILTER
-# ============================================================
-
-if "traffic_density" in df.columns:
-
-    traffic_options = sorted(
-        df["traffic_density"]
-        .dropna()
-        .astype(str)
-        .unique()
-    )
-
-    selected_traffic = st.sidebar.multiselect(
-        "Traffic Density",
-        traffic_options,
-        default=traffic_options
-    )
-
-else:
-
-    selected_traffic = []
-
-
-# ============================================================
-# APPLY FILTERS
-# ============================================================
-
-filtered_df = df.copy()
-
-
-if selected_severity:
-
-    filtered_df = filtered_df[
-        filtered_df["accident_severity"]
-        .astype(str)
-        .isin(selected_severity)
+section = st.sidebar.radio(
+    "Select Analysis",
+    [
+        "Overview",
+        "Data Cleaning",
+        "Descriptive Statistics",
+        "Distribution Analysis",
+        "Normality Analysis",
+        "Categorical Analysis",
+        "Correlation Analysis"
     ]
-
-
-if "weather" in df.columns and selected_weather:
-
-    filtered_df = filtered_df[
-        filtered_df["weather"]
-        .astype(str)
-        .isin(selected_weather)
-    ]
-
-
-if "traffic_density" in df.columns and selected_traffic:
-
-    filtered_df = filtered_df[
-        filtered_df["traffic_density"]
-        .astype(str)
-        .isin(selected_traffic)
-    ]
+)
 
 
 # ============================================================
-# DASHBOARD KPIs
+# OVERVIEW
 # ============================================================
 
-st.header("📊 Accident Overview")
+if section == "Overview":
 
+    st.header("📊 Road Accident Dataset Overview")
 
-col1, col2, col3, col4 = st.columns(4)
-
-
-# Total accidents
-with col1:
-
-    st.metric(
-        "Total Accidents",
-        f"{len(filtered_df):,}"
+    st.markdown(
+        """
+        The dataset contains information about road accidents,
+        including location, time, road conditions, weather,
+        traffic conditions, casualties, vehicles involved,
+        accident severity, and risk score.
+        """
     )
 
+    st.divider()
 
-# Fatal accidents
-with col2:
+    # --------------------------------------------------------
+    # KPI CARDS
+    # --------------------------------------------------------
 
-    fatal_count = (
-        filtered_df["accident_severity"]
-        .astype(str)
-        .str.lower()
-        .eq("fatal")
-        .sum()
-    )
+    col1, col2, col3, col4 = st.columns(4)
 
-    st.metric(
-        "Fatal Accidents",
-        f"{fatal_count:,}"
-    )
-
-
-# Casualties
-with col3:
-
-    if "casualties" in filtered_df.columns:
-
-        total_casualties = pd.to_numeric(
-            filtered_df["casualties"],
-            errors="coerce"
-        ).sum()
-
-    else:
-
-        total_casualties = 0
-
-    st.metric(
-        "Total Casualties",
-        f"{total_casualties:,.0f}"
-    )
-
-
-# Vehicles
-with col4:
-
-    if "vehicles_involved" in filtered_df.columns:
-
-        total_vehicles = pd.to_numeric(
-            filtered_df["vehicles_involved"],
-            errors="coerce"
-        ).sum()
-
-    else:
-
-        total_vehicles = 0
-
-    st.metric(
-        "Vehicles Involved",
-        f"{total_vehicles:,.0f}"
-    )
-
-
-st.divider()
-
-
-# ============================================================
-# SEVERITY DISTRIBUTION
-# ============================================================
-
-col1, col2 = st.columns(2)
-
-
-with col1:
-
-    st.subheader("Accident Severity Distribution")
-
-    severity_count = (
-        filtered_df["accident_severity"]
-        .value_counts()
-        .reset_index()
-    )
-
-    severity_count.columns = [
-        "Severity",
-        "Count"
-    ]
-
-    fig = px.pie(
-        severity_count,
-        names="Severity",
-        values="Count",
-        hole=0.45,
-        title="Severity Distribution"
-    )
-
-    st.plotly_chart(
-        fig,
-        use_container_width=True
-    )
-
-
-# ============================================================
-# TRAFFIC DENSITY
-# ============================================================
-
-with col2:
-
-    if "traffic_density" in filtered_df.columns:
-
-        st.subheader("Traffic Density")
-
-        traffic_count = (
-            filtered_df["traffic_density"]
-            .value_counts()
-            .reset_index()
+    with col1:
+        st.metric(
+            "Total Records",
+            f"{len(df):,}"
         )
 
-        traffic_count.columns = [
-            "Traffic Density",
-            "Accidents"
-        ]
-
-        fig = px.bar(
-            traffic_count,
-            x="Traffic Density",
-            y="Accidents",
-            text="Accidents",
-            title="Accidents by Traffic Density"
+    with col2:
+        st.metric(
+            "Total Features",
+            df.shape[1]
         )
 
-        st.plotly_chart(
-            fig,
-            use_container_width=True
+    with col3:
+        st.metric(
+            "Missing Values",
+            f"{df.isnull().sum().sum():,}"
         )
 
-
-# ============================================================
-# ACCIDENTS BY HOUR
-# ============================================================
-
-if "hour" in filtered_df.columns:
-
-    st.subheader("⏰ Accidents by Hour")
-
-    hour_data = pd.to_numeric(
-        filtered_df["hour"],
-        errors="coerce"
-    )
-
-    hourly = (
-        hour_data
-        .value_counts()
-        .sort_index()
-        .reset_index()
-    )
-
-    hourly.columns = [
-        "Hour",
-        "Accidents"
-    ]
-
-    fig = px.line(
-        hourly,
-        x="Hour",
-        y="Accidents",
-        markers=True,
-        title="Accidents by Hour of Day"
-    )
-
-    fig.update_xaxes(
-        dtick=1
-    )
-
-    st.plotly_chart(
-        fig,
-        use_container_width=True
-    )
-
-
-# ============================================================
-# TEMPERATURE
-# ============================================================
-
-if "temperature" in filtered_df.columns:
-
-    st.subheader("🌡️ Temperature Distribution")
-
-    temperature_data = pd.to_numeric(
-        filtered_df["temperature"],
-        errors="coerce"
-    ).dropna()
-
-    fig = px.histogram(
-        temperature_data,
-        x=temperature_data,
-        nbins=30,
-        title="Accidents by Temperature"
-    )
-
-    fig.update_layout(
-        xaxis_title="Temperature",
-        yaxis_title="Number of Accidents"
-    )
-
-    st.plotly_chart(
-        fig,
-        use_container_width=True
-    )
-
-
-# ============================================================
-# VEHICLES INVOLVED
-# ============================================================
-
-if "vehicles_involved" in filtered_df.columns:
-
-    st.subheader("🚘 Vehicles Involved")
-
-    vehicle_data = pd.to_numeric(
-        filtered_df["vehicles_involved"],
-        errors="coerce"
-    )
-
-    vehicle_count = (
-        vehicle_data
-        .value_counts()
-        .sort_index()
-        .reset_index()
-    )
-
-    vehicle_count.columns = [
-        "Vehicles Involved",
-        "Accidents"
-    ]
-
-    fig = px.bar(
-        vehicle_count,
-        x="Vehicles Involved",
-        y="Accidents",
-        text="Accidents",
-        title="Accidents by Number of Vehicles"
-    )
-
-    st.plotly_chart(
-        fig,
-        use_container_width=True
-    )
-
-
-# ============================================================
-# TOP ACCIDENT CAUSES
-# ============================================================
-
-if "cause" in filtered_df.columns:
-
-    st.subheader("⚠️ Major Causes of Accidents")
-
-    cause_count = (
-        filtered_df["cause"]
-        .value_counts()
-        .head(10)
-        .reset_index()
-    )
-
-    cause_count.columns = [
-        "Cause",
-        "Accidents"
-    ]
-
-    fig = px.bar(
-        cause_count.sort_values("Accidents"),
-        x="Accidents",
-        y="Cause",
-        orientation="h",
-        title="Top 10 Accident Causes"
-    )
-
-    st.plotly_chart(
-        fig,
-        use_container_width=True
-    )
-
-
-# ============================================================
-# LOCATION MAP
-# ============================================================
-
-if (
-    "latitude" in filtered_df.columns
-    and "longitude" in filtered_df.columns
-):
-
-    st.subheader("🗺️ Accident Locations")
-
-    map_df = filtered_df[
-        [
-            "latitude",
-            "longitude"
-        ]
-    ].copy()
-
-    map_df["latitude"] = pd.to_numeric(
-        map_df["latitude"],
-        errors="coerce"
-    )
-
-    map_df["longitude"] = pd.to_numeric(
-        map_df["longitude"],
-        errors="coerce"
-    )
-
-    map_df = map_df.dropna()
-
-    if not map_df.empty:
-
-        fig = px.scatter_map(
-            map_df,
-            lat="latitude",
-            lon="longitude",
-            zoom=5,
-            height=500,
-            title="Geographical Distribution of Accidents"
+    with col4:
+        st.metric(
+            "Duplicate Rows",
+            f"{df.duplicated().sum():,}"
         )
 
-        fig.update_layout(
-            map_style="open-street-map"
-        )
+    st.divider()
 
-        st.plotly_chart(
-            fig,
-            use_container_width=True
-        )
+    # --------------------------------------------------------
+    # DATASET PREVIEW
+    # --------------------------------------------------------
 
-
-# ============================================================
-# MACHINE LEARNING
-# ============================================================
-
-st.divider()
-
-st.header("🤖 Machine Learning — Decision Tree")
-
-
-# ============================================================
-# PREPARE DATA
-# ============================================================
-
-ml_df = df.copy()
-
-
-# Target
-y = ml_df["accident_severity"].copy()
-
-
-# Features
-X_raw = ml_df.drop(
-    columns=["accident_severity"]
-)
-
-
-# Remove ID-like columns
-columns_to_drop = [
-    "id",
-    "accident_id"
-]
-
-
-X_raw = X_raw.drop(
-    columns=[
-        col for col in columns_to_drop
-        if col in X_raw.columns
-    ],
-    errors="ignore"
-)
-
-
-# ============================================================
-# HANDLE DATETIME COLUMNS
-# ============================================================
-
-for column in X_raw.columns:
-
-    if (
-        "date" in column
-        or column == "time"
-    ):
-
-        try:
-
-            converted = pd.to_datetime(
-                X_raw[column],
-                errors="coerce"
-            )
-
-            X_raw[column + "_year"] = (
-                converted.dt.year
-            )
-
-            X_raw[column + "_month"] = (
-                converted.dt.month
-            )
-
-            X_raw[column + "_day"] = (
-                converted.dt.day
-            )
-
-            X_raw = X_raw.drop(
-                columns=[column]
-            )
-
-        except Exception:
-
-            pass
-
-
-# ============================================================
-# ENCODE CATEGORICAL FEATURES
-# ============================================================
-
-X = pd.get_dummies(
-    X_raw,
-    drop_first=True
-)
-
-
-# Convert everything to numeric
-X = X.apply(
-    pd.to_numeric,
-    errors="coerce"
-)
-
-
-# Fill any remaining missing values
-X = X.fillna(0)
-
-
-# ============================================================
-# ENCODE TARGET
-# ============================================================
-
-label_encoder = LabelEncoder()
-
-y_encoded = label_encoder.fit_transform(
-    y.astype(str)
-)
-
-
-# ============================================================
-# TRAIN TEST SPLIT
-# ============================================================
-
-X_train, X_test, y_train, y_test = train_test_split(
-
-    X,
-    y_encoded,
-
-    test_size=0.20,
-
-    random_state=42,
-
-    stratify=y_encoded
-)
-
-
-# ============================================================
-# DECISION TREE MODEL
-# ============================================================
-
-model = DecisionTreeClassifier(
-
-    random_state=42,
-
-    class_weight="balanced"
-)
-
-
-model.fit(
-    X_train,
-    y_train
-)
-
-
-# ============================================================
-# PREDICTION
-# ============================================================
-
-y_pred = model.predict(
-    X_test
-)
-
-
-# ============================================================
-# METRICS
-# ============================================================
-
-accuracy = accuracy_score(
-    y_test,
-    y_pred
-)
-
-
-f1 = f1_score(
-    y_test,
-    y_pred,
-    average="weighted"
-)
-
-
-col1, col2, col3 = st.columns(3)
-
-
-with col1:
-
-    st.metric(
-        "Model",
-        "Decision Tree"
-    )
-
-
-with col2:
-
-    st.metric(
-        "Accuracy",
-        f"{accuracy * 100:.2f}%"
-    )
-
-
-with col3:
-
-    st.metric(
-        "Weighted F1 Score",
-        f"{f1 * 100:.2f}%"
-    )
-
-
-# ============================================================
-# FEATURE IMPORTANCE
-# ============================================================
-
-st.subheader("📌 Top 10 Important Features")
-
-
-feature_importance = pd.Series(
-
-    model.feature_importances_,
-
-    index=X.columns
-
-).sort_values(
-    ascending=False
-).head(10)
-
-
-importance_df = (
-    feature_importance
-    .sort_values()
-    .reset_index()
-)
-
-
-importance_df.columns = [
-    "Feature",
-    "Importance"
-]
-
-
-importance_df["Importance"] *= 100
-
-
-fig = px.bar(
-
-    importance_df,
-
-    x="Importance",
-
-    y="Feature",
-
-    orientation="h",
-
-    text="Importance",
-
-    title="Top 10 Feature Importance"
-)
-
-
-fig.update_traces(
-    texttemplate="%{text:.2f}%",
-    textposition="outside"
-)
-
-
-fig.update_layout(
-    xaxis_title="Importance (%)",
-    yaxis_title="Feature"
-)
-
-
-st.plotly_chart(
-    fig,
-    use_container_width=True
-)
-
-
-# ============================================================
-# PREDICTION SECTION
-# ============================================================
-
-st.divider()
-
-st.header("🔮 Predict Accident Severity")
-
-
-st.write(
-    "Enter the accident conditions below and click "
-    "**Predict Accident Severity**."
-)
-
-
-col1, col2, col3 = st.columns(3)
-
-
-# ============================================================
-# INPUT 1
-# ============================================================
-
-with col1:
-
-    risk_score = st.number_input(
-        "Risk Score",
-        min_value=0.0,
-        max_value=100.0,
-        value=50.0,
-        step=1.0
-    )
-
-
-    casualties = st.number_input(
-        "Casualties",
-        min_value=0,
-        max_value=100,
-        value=2,
-        step=1
-    )
-
-
-    vehicles_involved = st.number_input(
-        "Vehicles Involved",
-        min_value=1,
-        max_value=20,
-        value=2,
-        step=1
-    )
-
-
-# ============================================================
-# INPUT 2
-# ============================================================
-
-with col2:
-
-    latitude = st.number_input(
-        "Latitude",
-        value=8.5241,
-        format="%.4f"
-    )
-
-
-    longitude = st.number_input(
-        "Longitude",
-        value=76.9366,
-        format="%.4f"
-    )
-
-
-    temperature = st.number_input(
-        "Temperature",
-        value=25.0,
-        step=0.5
-    )
-
-
-# ============================================================
-# INPUT 3
-# ============================================================
-
-with col3:
-
-    hour = st.slider(
-        "Hour of Accident",
-        min_value=0,
-        max_value=23,
-        value=12
-    )
-
-
-    lanes = st.number_input(
-        "Number of Lanes",
-        min_value=1,
-        max_value=10,
-        value=2,
-        step=1
-    )
-
-
-# ============================================================
-# PREDICTION BUTTON
-# ============================================================
-
-if st.button(
-    "🚨 Predict Accident Severity",
-    use_container_width=True
-):
-
-    # Create an empty row with the same
-    # features used during model training
-
-    input_data = pd.DataFrame(
-
-        np.zeros(
-            (1, len(X.columns))
-        ),
-
-        columns=X.columns
-    )
-
-
-    # Values entered by user
-
-    feature_values = {
-
-        "risk_score":
-            risk_score,
-
-        "casualties":
-            casualties,
-
-        "latitude":
-            latitude,
-
-        "longitude":
-            longitude,
-
-        "temperature":
-            temperature,
-
-        "hour":
-            hour,
-
-        "vehicles_involved":
-            vehicles_involved,
-
-        "lanes":
-            lanes
-    }
-
-
-    # Insert values where matching
-    # model features exist
-
-    for feature, value in feature_values.items():
-
-        if feature in input_data.columns:
-
-            input_data.loc[
-                0,
-                feature
-            ] = value
-
-
-    # Make prediction
-
-    prediction = model.predict(
-        input_data
-    )
-
-
-    predicted_label = (
-        label_encoder
-        .inverse_transform(prediction)[0]
-    )
-
-
-    # Display result
-
-    st.success(
-        f"### Predicted Accident Severity: "
-        f"{predicted_label.upper()}"
-    )
-
-
-    # ========================================================
-    # PREDICTION PROBABILITY
-    # ========================================================
-
-    if hasattr(
-        model,
-        "predict_proba"
-    ):
-
-        probabilities = model.predict_proba(
-            input_data
-        )[0]
-
-
-        probability_df = pd.DataFrame({
-
-            "Severity":
-                label_encoder.classes_,
-
-            "Probability":
-                probabilities * 100
-
-        })
-
-
-        fig = px.bar(
-
-            probability_df,
-
-            x="Severity",
-
-            y="Probability",
-
-            text="Probability",
-
-            title="Prediction Probability"
-
-        )
-
-
-        fig.update_traces(
-
-            texttemplate="%{text:.2f}%",
-
-            textposition="outside"
-
-        )
-
-
-        fig.update_layout(
-
-            yaxis_title="Probability (%)",
-
-            xaxis_title="Severity",
-
-            yaxis_range=[
-                0,
-                100
-            ]
-
-        )
-
-
-        st.plotly_chart(
-
-            fig,
-
-            use_container_width=True
-
-        )
-
-
-# ============================================================
-# DATA PREVIEW
-# ============================================================
-
-st.divider()
-
-with st.expander(
-    "📋 View Filtered Accident Data"
-):
+    st.subheader("🔍 Dataset Preview")
 
     st.dataframe(
-        filtered_df,
+        df.head(10),
         use_container_width=True
+    )
+
+    st.divider()
+
+    # --------------------------------------------------------
+    # NUMERICAL AND CATEGORICAL VARIABLES
+    # --------------------------------------------------------
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+
+        st.subheader("🔢 Numerical Variables")
+
+        numerical_summary = pd.DataFrame({
+            "Variable": numerical_columns
+        })
+
+        st.dataframe(
+            numerical_summary,
+            use_container_width=True,
+            hide_index=True
+        )
+
+    with col2:
+
+        st.subheader("🔤 Categorical Variables")
+
+        categorical_summary = pd.DataFrame({
+            "Variable": categorical_columns
+        })
+
+        st.dataframe(
+            categorical_summary,
+            use_container_width=True,
+            hide_index=True
+        )
+
+    st.divider()
+
+    # --------------------------------------------------------
+    # ACCIDENT SEVERITY
+    # --------------------------------------------------------
+
+    st.subheader("🚦 Accident Severity Distribution")
+
+    severity_counts = df[
+        "accident_severity"
+    ].value_counts()
+
+    severity_table = pd.DataFrame({
+        "Severity": severity_counts.index,
+        "Count": severity_counts.values,
+        "Percentage": (
+            severity_counts.values /
+            len(df) * 100
+        ).round(2)
+    })
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+
+        st.dataframe(
+            severity_table,
+            use_container_width=True,
+            hide_index=True
+        )
+
+    with col2:
+
+        fig, ax = plt.subplots(
+            figsize=(7, 4)
+        )
+
+        sns.countplot(
+            data=df,
+            x="accident_severity",
+            order=severity_counts.index,
+            ax=ax
+        )
+
+        ax.set_title(
+            "Accident Severity Distribution"
+        )
+
+        ax.set_xlabel(
+            "Accident Severity"
+        )
+
+        ax.set_ylabel(
+            "Number of Accidents"
+        )
+
+        st.pyplot(fig)
+
+        plt.close(fig)
+
+
+# ============================================================
+# DATA CLEANING
+# ============================================================
+
+elif section == "Data Cleaning":
+
+    st.header("🧹 Data Cleaning")
+
+    st.markdown(
+        """
+        This section shows the quality of the original dataset
+        and the cleaning decisions applied before analysis.
+        """
+    )
+
+    # --------------------------------------------------------
+    # ORIGINAL DATASET INFORMATION
+    # --------------------------------------------------------
+
+    st.subheader("Original Dataset")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+
+        st.metric(
+            "Original Rows",
+            f"{len(original_df):,}"
+        )
+
+    with col2:
+
+        st.metric(
+            "Original Columns",
+            original_df.shape[1]
+        )
+
+    # --------------------------------------------------------
+    # MISSING VALUES
+    # --------------------------------------------------------
+
+    st.subheader("Missing Value Analysis")
+
+    missing_df = pd.DataFrame({
+        "Column": original_df.columns,
+        "Missing Values": original_df.isnull().sum().values,
+        "Missing Percentage": (
+            original_df.isnull().sum().values /
+            len(original_df) * 100
+        ).round(2)
+    })
+
+    missing_df = missing_df[
+        missing_df["Missing Values"] > 0
+    ]
+
+    if len(missing_df) > 0:
+
+        st.dataframe(
+            missing_df,
+            use_container_width=True,
+            hide_index=True
+        )
+
+    else:
+
+        st.success(
+            "No missing values were found."
+        )
+
+    # --------------------------------------------------------
+    # FESTIVAL COLUMN
+    # --------------------------------------------------------
+
+    if "festival" in original_df.columns:
+
+        festival_missing = original_df[
+            "festival"
+        ].isnull().sum()
+
+        festival_percentage = (
+            festival_missing /
+            len(original_df) * 100
+        )
+
+        st.warning(
+            f"The 'festival' column contains "
+            f"{festival_missing:,} missing values "
+            f"({festival_percentage:.2f}%). "
+            f"It was removed because the majority of "
+            f"its values are missing."
+        )
+
+    # --------------------------------------------------------
+    # DUPLICATES
+    # --------------------------------------------------------
+
+    st.subheader("Duplicate Records")
+
+    duplicate_count = original_df.duplicated().sum()
+
+    if duplicate_count == 0:
+
+        st.success(
+            "No duplicate records were found."
+        )
+
+    else:
+
+        st.warning(
+            f"{duplicate_count:,} duplicate records were found."
+        )
+
+    # --------------------------------------------------------
+    # CLEANED DATASET
+    # --------------------------------------------------------
+
+    st.subheader("Cleaned Dataset")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+
+        st.metric(
+            "Rows After Cleaning",
+            f"{len(df):,}"
+        )
+
+    with col2:
+
+        st.metric(
+            "Columns After Cleaning",
+            df.shape[1]
+        )
+
+    st.subheader("Cleaned Data Preview")
+
+    st.dataframe(
+        df.head(10),
+        use_container_width=True
+    )
+
+
+# ============================================================
+# DESCRIPTIVE STATISTICS
+# ============================================================
+
+elif section == "Descriptive Statistics":
+
+    st.header("📊 Descriptive Statistics")
+
+    st.markdown(
+        """
+        Descriptive statistics summarize the central tendency,
+        spread, and shape of numerical variables.
+        """
+    )
+
+    # --------------------------------------------------------
+    # VARIABLE SELECTION
+    # --------------------------------------------------------
+
+    selected_variable = st.selectbox(
+        "Select a numerical variable",
+        analysis_columns
+    )
+
+    data = df[
+        selected_variable
+    ].dropna()
+
+    # --------------------------------------------------------
+    # CALCULATE STATISTICS
+    # --------------------------------------------------------
+
+    mean_value = data.mean()
+    median_value = data.median()
+    std_value = data.std()
+    variance_value = data.var()
+    min_value = data.min()
+    max_value = data.max()
+    skewness_value = data.skew()
+    kurtosis_value = data.kurt()
+
+    # --------------------------------------------------------
+    # STATISTICS CARDS
+    # --------------------------------------------------------
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+
+        st.metric(
+            "Mean",
+            f"{mean_value:.3f}"
+        )
+
+    with col2:
+
+        st.metric(
+            "Median",
+            f"{median_value:.3f}"
+        )
+
+    with col3:
+
+        st.metric(
+            "Std Dev",
+            f"{std_value:.3f}"
+        )
+
+    with col4:
+
+        st.metric(
+            "Variance",
+            f"{variance_value:.3f}"
+        )
+
+    col5, col6, col7, col8 = st.columns(4)
+
+    with col5:
+
+        st.metric(
+            "Minimum",
+            f"{min_value:.3f}"
+        )
+
+    with col6:
+
+        st.metric(
+            "Maximum",
+            f"{max_value:.3f}"
+        )
+
+    with col7:
+
+        st.metric(
+            "Skewness",
+            f"{skewness_value:.3f}"
+        )
+
+    with col8:
+
+        st.metric(
+            "Kurtosis",
+            f"{kurtosis_value:.3f}"
+        )
+
+    st.divider()
+
+    # --------------------------------------------------------
+    # COMPLETE STATISTICAL TABLE
+    # --------------------------------------------------------
+
+    st.subheader(
+        "Complete Statistical Summary"
+    )
+
+    statistics = pd.DataFrame({
+        "Mean": df[analysis_columns].mean(),
+        "Median": df[analysis_columns].median(),
+        "Std Dev": df[analysis_columns].std(),
+        "Variance": df[analysis_columns].var(),
+        "Minimum": df[analysis_columns].min(),
+        "Maximum": df[analysis_columns].max(),
+        "Skewness": df[analysis_columns].skew(),
+        "Kurtosis": df[analysis_columns].kurt()
+    })
+
+    st.dataframe(
+        statistics.round(3),
+        use_container_width=True
+    )
+
+
+# ============================================================
+# DISTRIBUTION ANALYSIS
+# ============================================================
+
+elif section == "Distribution Analysis":
+
+    st.header("📈 Distribution Analysis")
+
+    st.markdown(
+        """
+        Histograms show the frequency distribution of a numerical
+        variable, while the KDE curve provides a smooth estimate
+        of its distribution.
+        """
+    )
+
+    # --------------------------------------------------------
+    # VARIABLE SELECTION
+    # --------------------------------------------------------
+
+    selected_variable = st.selectbox(
+        "Select a numerical variable",
+        analysis_columns
+    )
+
+    data = df[
+        selected_variable
+    ].dropna()
+
+    # --------------------------------------------------------
+    # HISTOGRAM + KDE
+    # --------------------------------------------------------
+
+    st.subheader(
+        f"Distribution of {selected_variable}"
+    )
+
+    fig, ax = plt.subplots(
+        figsize=(10, 5)
+    )
+
+    sns.histplot(
+        data=data,
+        kde=True,
+        ax=ax
+    )
+
+    ax.set_title(
+        f"Distribution of {selected_variable}"
+    )
+
+    ax.set_xlabel(
+        selected_variable
+    )
+
+    ax.set_ylabel(
+        "Frequency"
+    )
+
+    st.pyplot(fig)
+
+    plt.close(fig)
+
+    # --------------------------------------------------------
+    # BOX PLOT
+    # --------------------------------------------------------
+
+    st.subheader(
+        f"Box Plot of {selected_variable}"
+    )
+
+    fig2, ax2 = plt.subplots(
+        figsize=(10, 3)
+    )
+
+    sns.boxplot(
+        x=data,
+        ax=ax2
+    )
+
+    ax2.set_xlabel(
+        selected_variable
+    )
+
+    st.pyplot(fig2)
+
+    plt.close(fig2)
+
+    # --------------------------------------------------------
+    # INTERPRETATION
+    # --------------------------------------------------------
+
+    skew = data.skew()
+
+    if abs(skew) < 0.5:
+
+        interpretation = (
+            "The variable is approximately symmetric "
+            "based on its skewness."
+        )
+
+    elif skew >= 0.5:
+
+        interpretation = (
+            "The variable shows positive/right skewness."
+        )
+
+    else:
+
+        interpretation = (
+            "The variable shows negative/left skewness."
+        )
+
+    st.info(
+        f"Skewness = {skew:.3f}. {interpretation}"
+    )
+
+
+# ============================================================
+# NORMALITY ANALYSIS
+# ============================================================
+
+elif section == "Normality Analysis":
+
+    st.header("📐 Normality Analysis")
+
+    st.markdown(
+        """
+        Normality analysis checks whether a numerical variable
+        approximately follows a normal distribution.
+        """
+    )
+
+    # --------------------------------------------------------
+    # VARIABLE SELECTION
+    # --------------------------------------------------------
+
+    selected_variable = st.selectbox(
+        "Select a numerical variable",
+        analysis_columns
+    )
+
+    data = df[
+        selected_variable
+    ].dropna()
+
+    # --------------------------------------------------------
+    # NORMALITY TEST
+    # --------------------------------------------------------
+
+    statistic, p_value = normaltest(data)
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+
+        st.metric(
+            "Test Statistic",
+            f"{statistic:.4f}"
+        )
+
+    with col2:
+
+        st.metric(
+            "P-value",
+            f"{p_value:.6f}"
+        )
+
+    # --------------------------------------------------------
+    # INTERPRETATION
+    # --------------------------------------------------------
+
+    if p_value > 0.05:
+
+        st.success(
+            "The test does not provide sufficient evidence "
+            "to reject the assumption of normality."
+        )
+
+    else:
+
+        st.warning(
+            "The test indicates a statistically significant "
+            "deviation from a normal distribution."
+        )
+
+    st.info(
+        "Because the dataset contains 20,000 observations, "
+        "the normality test can detect even small deviations. "
+        "Therefore, the Q-Q plot and distribution shape should "
+        "also be considered."
+    )
+
+    # --------------------------------------------------------
+    # Q-Q PLOT
+    # --------------------------------------------------------
+
+    st.subheader(
+        f"Q-Q Plot of {selected_variable}"
+    )
+
+    fig, ax = plt.subplots(
+        figsize=(7, 7)
+    )
+
+    probplot(
+        data,
+        dist="norm",
+        plot=ax
+    )
+
+    ax.set_title(
+        f"Q-Q Plot of {selected_variable}"
+    )
+
+    st.pyplot(fig)
+
+    plt.close(fig)
+
+
+# ============================================================
+# CATEGORICAL ANALYSIS
+# ============================================================
+
+elif section == "Categorical Analysis":
+
+    st.header("📋 Categorical Analysis")
+
+    st.markdown(
+        """
+        Categorical analysis examines the frequency and percentage
+        distribution of non-numerical variables.
+        """
+    )
+
+    # --------------------------------------------------------
+    # AVAILABLE CATEGORICAL VARIABLES
+    # --------------------------------------------------------
+
+    usable_categorical = [
+        column
+        for column in categorical_columns
+        if df[column].nunique() <= 50
+    ]
+
+    selected_variable = st.selectbox(
+        "Select a categorical variable",
+        usable_categorical
+    )
+
+    # --------------------------------------------------------
+    # FREQUENCY
+    # --------------------------------------------------------
+
+    frequency = df[
+        selected_variable
+    ].value_counts()
+
+    percentage = (
+        df[selected_variable]
+        .value_counts(normalize=True) * 100
+    ).round(2)
+
+    summary = pd.DataFrame({
+        "Frequency": frequency,
+        "Percentage": percentage
+    })
+
+    # --------------------------------------------------------
+    # TABLE
+    # --------------------------------------------------------
+
+    st.subheader(
+        f"Distribution of {selected_variable}"
+    )
+
+    st.dataframe(
+        summary,
+        use_container_width=True
+    )
+
+    # --------------------------------------------------------
+    # BAR CHART
+    # --------------------------------------------------------
+
+    fig, ax = plt.subplots(
+        figsize=(10, 5)
+    )
+
+    sns.countplot(
+        data=df,
+        x=selected_variable,
+        order=frequency.index,
+        ax=ax
+    )
+
+    ax.set_title(
+        f"Distribution of {selected_variable}"
+    )
+
+    ax.set_xlabel(
+        selected_variable
+    )
+
+    ax.set_ylabel(
+        "Frequency"
+    )
+
+    plt.xticks(
+        rotation=30
+    )
+
+    plt.tight_layout()
+
+    st.pyplot(fig)
+
+    plt.close(fig)
+
+
+# ============================================================
+# CORRELATION ANALYSIS
+# ============================================================
+
+elif section == "Correlation Analysis":
+
+    st.header("🔗 Correlation Analysis")
+
+    st.markdown(
+        """
+        Correlation measures the strength and direction of
+        linear relationships between numerical variables.
+        """
+    )
+
+    # --------------------------------------------------------
+    # CORRELATION MATRIX
+    # --------------------------------------------------------
+
+    correlation_matrix = df[
+        analysis_columns
+    ].corr()
+
+    # --------------------------------------------------------
+    # HEATMAP
+    # --------------------------------------------------------
+
+    fig, ax = plt.subplots(
+        figsize=(10, 8)
+    )
+
+    sns.heatmap(
+        correlation_matrix,
+        annot=True,
+        fmt=".2f",
+        cmap="coolwarm",
+        center=0,
+        ax=ax
+    )
+
+    ax.set_title(
+        "Correlation Matrix"
+    )
+
+    st.pyplot(fig)
+
+    plt.close(fig)
+
+    # --------------------------------------------------------
+    # CORRELATION TABLE
+    # --------------------------------------------------------
+
+    st.subheader(
+        "Correlation Values"
+    )
+
+    st.dataframe(
+        correlation_matrix.round(3),
+        use_container_width=True
+    )
+
+    st.info(
+        """
+        Interpretation:
+        +1 indicates a strong positive linear relationship,
+        0 indicates little or no linear relationship,
+        and -1 indicates a strong negative linear relationship.
+
+        Correlation describes association and does not imply causation.
+        """
     )
 
 
@@ -1134,9 +955,12 @@ with st.expander(
 # FOOTER
 # ============================================================
 
-st.divider()
+st.sidebar.divider()
 
-st.caption(
-    "Road Accident Analysis & Severity Prediction | "
-    "B.Tech CSE (AI) Microproject"
+st.sidebar.caption(
+    "Road Accident Statistical Analysis"
+)
+
+st.sidebar.caption(
+    "Data Science Project"
 )
